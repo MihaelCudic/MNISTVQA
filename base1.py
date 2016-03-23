@@ -18,15 +18,15 @@ class Data(object):
                  X, Y, batchSize,
                  xCanDim = 64,
                  yCanDim = 64,                 
-                 canDim = [],
-                 border = [],
+                 canDim = None,
+                 border = None,
                  xBorder = 0,
                  yBorder = 0,
-                 nImgs = [],
+                 nImgs = None,
                  minNImgs = 1,
                  maxNImgs = 2,
                  randNImgs = False,
-                 scaling = [],
+                 scaling = None,
                  minScale = 1,
                  maxScale = 1,
                  minImgSep = None,
@@ -65,16 +65,16 @@ class Data(object):
         self.imgDim = [len(X[1][0][0]), len(X[1][0])]
 
         # Set dimensions of canvas       
-        self.canDim = [xCanDim, yCanDim] if canDim == [] else canDim        
+        self.canDim = [xCanDim, yCanDim] if canDim == None else canDim        
         
         # Set borders inside canvas       
-        self.xBorder, self.yBorder = [xBorder, yBorder] if border == [] else border 
+        self.xBorder, self.yBorder = [xBorder, yBorder] if border == None else border 
         
         # Set the attribute regarding number of images pasted to canvas
-        self.minNImgs, self.maxNImgs, self.randNImgs = [minNImgs, maxNImgs, randNImgs] if nImgs == [] else nImgs       
+        self.minNImgs, self.maxNImgs, self.randNImgs = [minNImgs, maxNImgs, randNImgs] if nImgs == None else nImgs       
         
         # Set the the scaling of the pasted images
-        self.minScale, self.maxScale = [minScale, maxScale] if scaling == [] else scaling
+        self.minScale, self.maxScale = [minScale, maxScale] if scaling == None else scaling
         
         # Set seperation of pasted images
         self.minImgSep = np.max(self.imgDim)/2 if minImgSep is None else minImgSep   
