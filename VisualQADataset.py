@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[ ]:
+# In[1]:
 
 """
 Create online database for question/answer on a canvas of MNIST images
@@ -16,9 +16,9 @@ import random
 random.seed()
 
 
-# In[ ]:
+# In[2]:
 
-class VQADataset(object):
+class VQAData(object):
     
     def __init__(self,
                  X, Y, batchSize,
@@ -122,6 +122,7 @@ class VQADataset(object):
             canvas - 3d matrix of images (Note: [image number, :, :] == input canvas)
             question - question corresponding to canvas (Specific to MNIST)
             answer - answer to question
+            qType - type of question asked
         """ 
         # Preallocate space for output variables
         canvas = np.zeros([self.batchSize, self.canDim[0], self.canDim[1]])
@@ -148,7 +149,7 @@ class VQADataset(object):
     
     def createCanvas(self):
         """
-        Create new canvas give specs assigned previously
+        Create new canvas given specs assigned previously
         INPUT: None
         OUTPUT:
             canvas - 2d matrix of pixel values
@@ -251,18 +252,14 @@ class VQADataset(object):
 
     def addSubImgs(self, nImgs):
         """
-        Find starting indeces noting minimum seperation restrictions between previously pasted images
-        Create subimage to paste into canvas
+        Find specs of each pasted subImg
         INPUT: 
-            nSubs - current number of subImages on the canvas
-            subScales - scaling of the subImages on the canvas
-            subCenters - center points of the subImages on the canvas
-            fitCanvas - 2d matrix of allowable starting conditions
-            scale - scale of current subImage pasted into canvas
-            halfImgDim - the half dimensions of new scaled subImage 
-                         (used to calculate subImage center)
+            nImgs - how subImgs will be pasted
         OUTPUT:
-            strt - starting [x, y] indeces to paste subImage to canvas
+            scale - scaling for each subImgs
+            newImgDim - new dimensions once scaled
+            strt - starting indeces [x, y] of new subImg
+            center - center points [x, y] of new subImg 
         """
         # Dimensions of canvas accounting for border restrictions
         dim = [x-2*y for (x,y) in zip(self.canDim,[self.xBorder, self.yBorder]) ]
@@ -277,13 +274,14 @@ class VQADataset(object):
         halfImgDim = map(lambda x: (x-1.0)/2.0, newImgDim) # used for determining center points of image
         halfImgDim = np.reshape(halfImgDim, (nImgs, 2))
         
-        # Place first subImage
+        # Generate specs of first subImgs
         newXStrt = random.randint(0,dim[0]-newImgDim[0,0]-1)+self.xBorder
         newYStrt = random.randint(0,dim[1]-newImgDim[0,1]-1)+self.yBorder
         strt[0,:] = [newXStrt, newYStrt]
         center[0,:] = np.add(halfImgDim[0,:],strt[0,:])
         nSubs = 1;
         
+        # Generate specs of other subImgs
         for i in range(1, nImgs):
             found = False
             
@@ -327,6 +325,7 @@ class VQADataset(object):
                         maxSepInd = ind
                         maxSep = np.sum(sep)
             if not found:
+                print('reached')
                 # Paste image in position that allows for maximum seperation
                 maxXStrt = posFit[0][maxSepInd]+self.xBorder
                 maxYStrt = posFit[1][maxSepInd]+self.yBorder
@@ -337,17 +336,23 @@ class VQADataset(object):
         
                                                                                 
     def getVocab(self):
+        """
+            Generate all possible words used for question and answers
+            INPUTS: None
+            OUTPUTS:
+                vocab - unique vocab used in questions and answers
+        """
         qWords = '' 
         for q in self.askQ:
             qWords += " "+q(vocab=True)
         
-        # List of words used in questions
+        # List of words used in questions ((\W+)? are seperted as well)
         vocabList = [x.strip() for x in re.split('(\W+)?', qWords) if x.strip()]
         
         # Predefined list of words used in questions
-        # NOTE: these might have to be adjusted
-        vocabList += ['None', 'Yes', 'No'] # C
-        vocabList += map(str, xrange((9**self.maxNImgs)+1))
+        # NOTE: these might have to be adjusted. I did this to save time
+        vocabList += ['None', 'Yes', 'No'] # Known outputs
+        vocabList += map(str, xrange((9**self.maxNImgs)+1)) # Account for products
 
         return set(vocabList)
         
@@ -365,7 +370,7 @@ class VQADataset(object):
                 vocab - boolean stating whether you want the possible questions outputed
             OUPUTS:
                 question - sentence of sample questions if vocab = True
-                [question, answer] - question and answer of canvas
+                [question, answer, type] - question and answer of canvas; type of question asked
     """   
     def containsA(self,
                   subStrts = None,
@@ -531,16 +536,15 @@ class VQADataset(object):
         return [question, str(len(subClasses)), 7]
 
 
-# In[ ]:
+# In[3]:
 
 """
-%matplotlib inline
-import matplotlib.pyplot as plt 
-
-import re
+    Generate MNIST Images
+"""
 from keras.datasets import mnist
 from keras.utils import np_utils
 
+nb_classes = 10
 # input image dimensions
 img_rows, img_cols = 28, 28
 # number of convolutional filters to use
@@ -550,10 +554,8 @@ nb_pool = 2
 # convolution kernel size
 nb_conv = 3
 
-(X_train, y_train), (X_test, y_test) = mnist.load_data()
-
 # the data, shuffled and split between train and test sets
-(X_train, y_train), (X_test, y_test) = mnist.load_data()
+(X_train, Y_train), (X_test, Y_test) = mnist.load_data()
 
 X_train = X_train.reshape(X_train.shape[0], 1, img_rows, img_cols)
 X_test = X_test.reshape(X_test.shape[0], 1, img_rows, img_cols)
@@ -562,23 +564,101 @@ X_test = X_test.astype('float32')
 X_train /= 255
 X_test /= 255
 
-# the data, shuffled and split between train and test sets
-(X_train, y_train), (X_test, y_test) = mnist.load_data()
 
-X_train = X_train.reshape(X_train.shape[0], 1, img_rows, img_cols)
-X_test = X_test.reshape(X_test.shape[0], 1, img_rows, img_cols)
-X_train = X_train.astype('float32')
-X_test = X_test.astype('float32')
-X_train /= 255
-X_test /= 255
+# In[4]:
+
 """
+    Generate VQA datasets
+"""
+# Initialize Parameters
+pValid = .2
+nTrain = 70000 # Size of training dataset
+nValid =int(round(pValid*nTrain/(1-pValid))) # Size of validation dataset
+nTest = 10000 # Size of test dataset
+canDim = [64, 64]
+border=[-5,-5]
+nImgs=[1,3, True]
+scaling=[.6,1.1]
+clutter = True
+clutterDim=[8,8]
+maxClutter = 6
+
+# Seperate MNIST
+trMNIST = int(np.round((1-pValid)*len(X_train)))
+
+X_valid = X_train[trMNIST:,:,:,:]
+Y_valid = Y_train[trMNIST:]
+X_train = X_train[0:trMNIST,:,:,:]
+Y_train = Y_train[0:trMNIST]
+
+# Create instance of data
+train = VQAData(X_train, 
+            Y_train, 
+            nTrain, 
+            canDim=canDim, 
+            border=border, 
+            nImgs=nImgs, 
+            scaling=scaling)
+valid = VQAData(X_valid, 
+            Y_valid, 
+            nValid, 
+            canDim=canDim, 
+            border=border, 
+            nImgs=nImgs, 
+            scaling=scaling)
+test = VQAData(X_test, 
+            Y_test, 
+            nTest, 
+            canDim=canDim, 
+            border=border, 
+            nImgs=nImgs, 
+            scaling=scaling)
+
+
+# In[13]:
+
+"""
+    Store Data
+"""
+import h5py
+
+title = "VQAData.hdf5"
+fout = h5py.File(title, "w")
+
+
+C_train, Q_train, A_train, T_train = train.getBatch()
+fout.create_dataset("C_train", data=C_train)
+fout.create_dataset("Q_train", data=Q_train)
+fout.create_dataset("A_train", data=A_train)
+fout.create_dataset("T_train", data=T_train)
+del C_train, Q_train, A_train, T_train
+
+C_valid, Q_valid, A_valid, T_valid = valid.getBatch()
+fout.create_dataset("C_valid", data=C_valid)
+fout.create_dataset("Q_valid", data=Q_valid)
+fout.create_dataset("A_valid", data=A_valid)
+fout.create_dataset("T_valid", data=T_valid)
+del C_valid, Q_valid, A_valid, T_valid
+
+
+C_test, Q_test, A_test, T_test = test.getBatch()
+fout.create_dataset("C_test", data=C_test)
+fout.create_dataset("Q_test", data=Q_test)
+fout.create_dataset("A_test", data=A_test)
+fout.create_dataset("T_test", data=T_test)
+del C_test, Q_test, A_test, T_test
+
+fout.create_dataset("vocab", train.getVocab())
+
+fout.close()
 
 
 # In[ ]:
 
 """
-data = VQADataset(X_test[0:100], y_test[0:100], 9, canDim=[64,64], nImgs=[2,3, True], border=[-5,-5], scaling=[.5,1.1], clutter = True, clutterDim=[8,8], maxClutter = 6)
-canvas, question, answer, qType = data.getBatch()
+%matplotlib inline
+import matplotlib.pyplot as plt 
+
 
 for i in range(9):
     plt.subplot(3, 3, i+1)
@@ -593,11 +673,6 @@ for i in range(9):
 plt.axis("off")
 
 
-vocab = data.getVocab()
+vocab = train.getVocab()
 """
-
-
-# In[ ]:
-
-#print(vocab)
 
