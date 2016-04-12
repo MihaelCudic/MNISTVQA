@@ -570,11 +570,12 @@ X_test /= 255
 """
     Generate VQA datasets
 """
+print("Creating Objects")
 # Initialize Parameters
-pValid = .2
-nTrain = 70000 # Size of training dataset
+pValid = .3
+nTrain = 200000 # Size of training dataset
 nValid =int(round(pValid*nTrain/(1-pValid))) # Size of validation dataset
-nTest = 10000 # Size of test dataset
+nTest = 100000 # Size of test dataset
 canDim = [64, 64]
 border=[-5,-5]
 nImgs=[1,3, True]
@@ -615,11 +616,12 @@ test = VQAData(X_test,
             scaling=scaling)
 
 
-# In[13]:
+# In[5]:
 
 """
     Store Data
 """
+print("Storing...")
 import h5py
 
 title = "VQAData.hdf5"
@@ -632,6 +634,7 @@ fout.create_dataset("Q_train", data=Q_train)
 fout.create_dataset("A_train", data=A_train)
 fout.create_dataset("T_train", data=T_train)
 del C_train, Q_train, A_train, T_train
+print("Training finished...")
 
 C_valid, Q_valid, A_valid, T_valid = valid.getBatch()
 fout.create_dataset("C_valid", data=C_valid)
@@ -639,7 +642,7 @@ fout.create_dataset("Q_valid", data=Q_valid)
 fout.create_dataset("A_valid", data=A_valid)
 fout.create_dataset("T_valid", data=T_valid)
 del C_valid, Q_valid, A_valid, T_valid
-
+print("Validation finished...")
 
 C_test, Q_test, A_test, T_test = test.getBatch()
 fout.create_dataset("C_test", data=C_test)
@@ -647,8 +650,10 @@ fout.create_dataset("Q_test", data=Q_test)
 fout.create_dataset("A_test", data=A_test)
 fout.create_dataset("T_test", data=T_test)
 del C_test, Q_test, A_test, T_test
+print("Test finished...")
 
-fout.create_dataset("vocab", train.getVocab())
+vocab = list(train.getVocab())
+fout.create_dataset("vocab", data=vocab)
 
 fout.close()
 
