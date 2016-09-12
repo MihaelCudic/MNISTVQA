@@ -102,17 +102,17 @@ class VQAData(object):
         self.minScale, self.maxScale = [minScale, maxScale] if scaling == None else scaling
         
         # Set seperation of pasted images
-        self.minImgSep = np.max(self.imgDim)/2 if minImgSep is None else minImgSep   
-        
-        # List of possible functions called
-        self.askQ = [self.containsA, self.containsOdd, self.totalSum, self.totalProduct, 
-                     self.xMost, self.xNumerical, self.xSize, self.nSubImages]  
+        self.minImgSep = np.max(self.imgDim)/2 if minImgSep is None else minImgSep     
         
         # Set the attribute regarding number of images pasted to canvas
         self.clutter, self.minClutter, self.maxClutter, self.randClutter = [clutter, minClutter, maxClutter, randClutter] if nClutter == None else nClutter  
         
         # Set borders inside canvas       
         self.clutterDim = [xClutter, yClutter] if clutterDim == None else clutterDim
+        
+        # List of possible functions called
+        self.askQ = [self.containsA, self.containsOdd, self.totalSum, self.totalProduct, 
+                     self.xMost, self.xNumerical, self.xSize, self.nSubImages, self.xRange]
         
     def getBatch(self):
         """
@@ -128,16 +128,18 @@ class VQAData(object):
         canvas = np.zeros([self.batchSize, self.canDim[0], self.canDim[1]])
         question = [None]*self.batchSize
         answer = [None]*self.batchSize
-        qType = [None]*self.batchSize  
+        qType = [None]*self.batchSize
+        classes = []
         
         # Generate input data for batch
         for i in range(self.batchSize):         
-            canvas[i,:,:],subClasses, subScales, subStrts, subCenters = self.createCanvas()
+            canvas[i,:,:], subClasses, subScales, subStrts, subCenters = self.createCanvas()
+            classes.append(subClasses)
             question[i], answer[i], qType[i] = random.choice(self.askQ)(subStrts, subCenters, subScales, subClasses)
         
         canvas = canvas[:, None, :, :]
             
-        return canvas, question, answer, qType
+        return canvas, question, answer, qType, classes
     
     def randomDataset(self):
         """
@@ -174,7 +176,7 @@ class VQAData(object):
             subScales, newImgDim, subStrts, subCenters = self.addSubImgs(nImgs) 
         
         # Preallocate space for subImg classification
-        subClasses = np.zeros([nImgs, 1]) # classes of input images in canvas
+        subClasses = [0]*nImgs # classes of input images in canvas
 
         self.randomDataset() # Shuffle dataset 
         # Iterate and paste subImgs on canvas
@@ -304,6 +306,7 @@ class VQAData(object):
             
             # Minimum seperation distance for the subImage to be deemed resolved
             minSep = (scale[0:i]+scale[i])*self.minImgSep
+
             for ind in randPerm:
                 # Generate starting indeces and starting points 
                 newXStrt = posFit[0][ind]+self.xBorder
@@ -312,10 +315,10 @@ class VQAData(object):
                 newCenter = np.add(halfImgDim[i,:],newStrt)
 
                 # Calculate distances between previously pasted images
-                sep = np.sqrt(np.sum((center[0:nSubs]-newCenter)**2,axis=1))
+                sep = np.sqrt(np.sum((center[0:i]-newCenter)**2,axis=1))
 
                 # Append no fit list if newSubImage intrudes on already pasted subImage
-                booleans = [ x>y for (x,y) in zip(sep[0:nSubs], minSep[0:nSubs])]
+                booleans = [ x>y for (x,y) in zip(sep[0:i], minSep[0:i])]
                 if all(booleans):
                     strt[i,:] = newStrt
                     center[i,:] = newCenter
@@ -325,16 +328,15 @@ class VQAData(object):
                         maxSepInd = ind
                         maxSep = np.sum(sep)
             if not found:
-                print('reached')
                 # Paste image in position that allows for maximum seperation
                 maxXStrt = posFit[0][maxSepInd]+self.xBorder
                 maxYStrt = posFit[1][maxSepInd]+self.yBorder
                 strt[i,:] = [maxXStrt, maxYStrt]
                 center[i,:] = np.add(halfImgDim[i,:],strt[i,:])
         return scale, newImgDim, strt, center 
-        
-        
-                                                                                
+
+    
+    
     def getVocab(self):
         """
             Generate all possible words used for question and answers
@@ -345,21 +347,19 @@ class VQAData(object):
         qWords = '' 
         for q in self.askQ:
             qWords += " "+q(vocab=True)
-        
+
         # List of words used in questions ((\W+)? are seperted as well)
         vocabList = [x.strip() for x in re.split('(\W+)?', qWords) if x.strip()]
-        
+
         # Predefined list of words used in questions
         # NOTE: these might have to be adjusted. I did this to save time
-        vocabList += ['None', 'Yes', 'No'] # Known outputs
+        vocabList += ['None', 'Yes', 'No', 'NA'] # Known outputs
         vocabList += map(str, xrange((9**self.maxNImgs)+1)) # Account for products
 
-        return set(vocabList)
-        
-        
-        
-        
-        
+        return list(set(vocabList))
+    
+    
+    
     """
         Create Questions about canvas
             INPUTS:
@@ -369,7 +369,6 @@ class VQAData(object):
                 subClasses - array of classifications for subImgs
                 vocab - boolean stating whether you want the possible questions outputed
             OUPUTS:
-                question - sentence of sample questions if vocab = True
                 [question, answer, type] - question and answer of canvas; type of question asked
     """   
     def containsA(self,
@@ -379,29 +378,35 @@ class VQAData(object):
                   subClasses = None,
                   vocab = False):
         num = random.randint(0,9)
-        question = 'Does the image contain a '+str(num)+'?'
-        answer = 'No'        
+        aNum = 'an '+str(num) if num == 8 else 'a '+str(num)
+        question = ['Does the image contain '+aNum+'?',
+                    'Is '+str(num)+' in the image?',
+                    'Is there '+aNum+'?']
+        answer = 'No'       
         
         if(vocab):
-            return question
+            return " ".join(question+['a', 'an'])
         
         booleans = [ x==num for x in subClasses ]        
         if(any(booleans)):
             answer = 'Yes'
         
-        return [question, answer, 0]
+        return [random.choice(question), answer, 0]
     def containsOdd(self,
                     subStrts = None,
                     subCenters = None,
                     subScales = None,
                     subClasses = None,
                     vocab = False):
-        num = random.randint(0,1)        
-        question = ['Does the image contain an odd number?', 'Does the image contain an even number?']
+        num = random.randint(0,1)
+        p = ['odd', 'even']
+        question = ['Does the image contain an '+p[num]+' number?',
+                    'Is an '+p[num]+' number in the image?',
+                    'Is there an '+p[num]+' number?']
         answer = 'No'        
         
         if(vocab):
-            return " ".join(question)
+            return " ".join(question+p)
         
         booleans = [ x%2==1 for x in subClasses ]
         booleansEven = [ x%2==0 for x in subClasses ]
@@ -410,37 +415,41 @@ class VQAData(object):
         elif(any(booleansEven) and num==1):
             answer = 'Yes'
         
-        return [question[num], answer, 1]
+        return [random.choice(question), answer, 1]
     def totalSum(self,
                  subStrts = None,
                  subCenters = None,
                  subScales = None,
                  subClasses = None,
                  vocab = False):
-        question = 'What is the total sum of all the numbers in the image?'
-        ans = '0'
+        question = ['What is the total sum?',
+                    'What is the sum of all the numbers?',
+                    'The total sum is?']
+        ans = 'NA'
         
         if(vocab):
-            return question
+            return " ".join(question)
         
-        if len(subClasses>0):
-            ans = str(np.sum(subClasses).astype(int))
-        return [question, ans, 2]
+        if len(subClasses)>0:
+            ans = str(int(np.sum(subClasses)))
+        return [random.choice(question), ans, 2]
     def totalProduct(self,
                      subStrts = None,
                      subCenters = None,
                      subScales = None,
                      subClasses = None,
                      vocab = False):
-        question = 'What is the total product of all the numbers?'
-        ans = '0'
+        question = ['What is the total product?',
+                    'What is the product of all the numbers?',
+                    'The total product is?']
+        ans = 'NA'
         
         if(vocab):
-            return question
+            return " ".join(question)
         
-        if len(subClasses>0):
-            ans = str(np.product(subClasses).astype(int))
-        return [question, ans, 3]
+        if len(subClasses)>0:
+            ans = str(int(np.product(subClasses)))
+        return [random.choice(question), ans, 3]
     def xMost(self,
               subStrts = None,
               subCenters = None,
@@ -450,15 +459,15 @@ class VQAData(object):
         options = ['top', 'right', 'bottom', 'left']
         choice = random.randint(0,len(options)-1)
         
-        question = 'What is the '+options[choice]+' most number?'
+        question = ['What is the '+options[choice]+' most number?',
+                    'The '+options[choice]+' most number is?',
+                    'What number is closest to the '+options[choice]+' side?']
         ans = 'None'
         
         if(vocab):
-            return " ".join([" ".join(options), question])
-        if len(subClasses) == 0:
-            return [question, ans, 4]
+            return " ".join(question+options)
         
-        if len(subClasses>0):
+        if len(subClasses)>0:
             if choice == 0:
                 ind = subCenters[:,1].tolist().index(min(subCenters[:,1]))
                 ans = subClasses[ind]
@@ -471,7 +480,7 @@ class VQAData(object):
             elif choice == 3:
                 ind = subCenters[:,0].tolist().index(min(subCenters[:,0]))
                 ans = subClasses[ind]
-        return [question, str(int(ans[0])), 4]
+        return [random.choice(question), str(ans), 4]
     def xNumerical(self,
                    subStrts = None,
                    subCenters = None,
@@ -481,22 +490,22 @@ class VQAData(object):
         options = ['smallest', 'largest']
         choice = random.randint(0,len(options)-1)
         
-        question = 'What is the '+options[choice]+' numerical value?'
+        question = ['What is the '+options[choice]+' numerical value?',
+                    'The '+options[choice]+' numerical value is?',
+                    'What number is numerically the '+options[choice]+'?']
         ans = 'None'
         
         if(vocab):
-            return " ".join([" ".join(options), question])
-        if len(subClasses) == 0:
-            return [question, ans, 5]
+            return " ".join(question+options)
         
-        if len(subClasses>0):
+        if len(subClasses)>0:
             if choice == 0:
-                ind = subClasses.tolist().index(min(subClasses))
+                ind = subClasses.index(min(subClasses))
                 ans = subClasses[ind]
             elif choice == 1:
-                ind = subClasses.tolist().index(max(subClasses))
+                ind = subClasses.index(max(subClasses))
                 ans = subClasses[ind]
-        return [question, str(int(ans[0])), 5]
+        return [random.choice(question), str(ans), 5]
     def xSize(self,
               subStrts = None,
               subCenters = None,
@@ -506,37 +515,70 @@ class VQAData(object):
         options = ['smallest', 'largest']
         choice = random.randint(0,len(options)-1)
         
-        question = 'What is the '+options[choice]+' sized number?'
+        question = ['What is the '+options[choice]+' sized number?',
+                    'The '+options[choice]+' sized number is?',
+                    'What number has the '+options[choice]+' size?']
         ans = 'None'
         
         if(vocab):
-            return " ".join([" ".join(options), question])
-        if len(subClasses) == 0:
-            return [question, ans, 6]
-        
-        if len(subClasses>0):
+            return " ".join(question+options)
+
+        if len(subClasses)>0:
             if choice == 0:
                 ind = subScales.tolist().index(min(subScales))
                 ans = subClasses[ind]
             elif choice == 1:
                 ind = subScales.tolist().index(max(subScales))
                 ans = subClasses[ind]
-        return [question, str(int(ans[0])), 6]
+        return [random.choice(question), str(ans), 6]
     def nSubImages(self,
                    subStrts = None,
                    subCenters = None,
                    subScales = None,
                    subClasses = None,
                    vocab = False):
-        question = 'How many numbers are in the image?'
+        question = ['How many numbers are in the image?',
+                    'How many numbers are there?',
+                    'The image contains how many numbers?']
         
         if(vocab):
-            return question
+            return " ".join(question)
+
+        return [random.choice(question), str(len(subClasses)), 7]
+    
+    def xRange(self,
+                   subStrts = None,
+                   subCenters = None,
+                   subScales = None,
+                   subClasses = None,
+                   vocab = False):
+        question = ['What is the range?',
+                    'What is the range of all the numbers?',
+                    'The total range is?']
+        ans = 'NA'
         
-        return [question, str(len(subClasses)), 7]
+        if(vocab):
+            return " ".join(question)
+        
+        if len(subClasses)>1:
+            num = int(max(subClasses)-min(subClasses))
+            ans = str(num)
+        
+        return [random.choice(question), ans, 8]
 
 
 # In[3]:
+
+def formatClasses(classes):
+    length = len(classes)
+    Y = np.array(np.zeros([length, 10]))
+    for ind in xrange(length):
+        Y[ind, np.array(classes[ind][:]).astype(int)] = 1.
+
+    return np.array(Y)
+
+
+# In[4]:
 
 """
     Generate MNIST Images
@@ -565,21 +607,21 @@ X_train /= 255
 X_test /= 255
 
 
-# In[4]:
+# In[5]:
 
 """
     Generate VQA datasets
 """
 print("Creating Objects")
 # Initialize Parameters
-pValid = .3
-nTrain = 200000 # Size of training dataset
-nValid =int(round(pValid*nTrain/(1-pValid))) # Size of validation dataset
-nTest = 100000 # Size of test dataset
+nTrain = 100000 # Size of training dataset
+nValid = 25000 # Size of validation dataset
+pValid = float(nValid)/(nTrain+nValid)
+nTest = 25000 # Size of test dataset
 canDim = [64, 64]
-border=[-5,-5]
+border=[-3,-3]
 nImgs=[1,3, True]
-scaling=[.6,1.1]
+scaling=[.6,1.2]
 clutter = True
 clutterDim=[8,8]
 maxClutter = 6
@@ -599,36 +641,48 @@ train = VQAData(X_train,
             canDim=canDim, 
             border=border, 
             nImgs=nImgs, 
-            scaling=scaling)
+            scaling=scaling,
+            clutter=clutter,
+            clutterDim = clutterDim,
+            maxClutter = maxClutter)
+
 valid = VQAData(X_valid, 
             Y_valid, 
             nValid, 
             canDim=canDim, 
             border=border, 
             nImgs=nImgs, 
-            scaling=scaling)
+            scaling=scaling,
+            clutter=clutter,
+            clutterDim = clutterDim,
+            maxClutter = maxClutter)
 test = VQAData(X_test, 
             Y_test, 
             nTest, 
             canDim=canDim, 
             border=border, 
             nImgs=nImgs, 
-            scaling=scaling)
+            scaling=scaling,
+            clutter=clutter,
+            clutterDim = clutterDim,
+            maxClutter = maxClutter)
 
 
-# In[5]:
+# In[6]:
+
 
 """
     Store Data
 """
+"""
 print("Storing...")
 import h5py
 
-title = "VQAData.hdf5"
+title = "VQADataCluttered.hdf5"
 fout = h5py.File(title, "w")
 
 
-C_train, Q_train, A_train, T_train = train.getBatch()
+C_train, Q_train, A_train, T_train, Class_train = train.getBatch()
 fout.create_dataset("C_train", data=C_train)
 fout.create_dataset("Q_train", data=Q_train)
 fout.create_dataset("A_train", data=A_train)
@@ -636,7 +690,7 @@ fout.create_dataset("T_train", data=T_train)
 del C_train, Q_train, A_train, T_train
 print("Training finished...")
 
-C_valid, Q_valid, A_valid, T_valid = valid.getBatch()
+C_valid, Q_valid, A_valid, T_valid, Class_valid = valid.getBatch()
 fout.create_dataset("C_valid", data=C_valid)
 fout.create_dataset("Q_valid", data=Q_valid)
 fout.create_dataset("A_valid", data=A_valid)
@@ -644,7 +698,7 @@ fout.create_dataset("T_valid", data=T_valid)
 del C_valid, Q_valid, A_valid, T_valid
 print("Validation finished...")
 
-C_test, Q_test, A_test, T_test = test.getBatch()
+C_test, Q_test, A_test, T_test, Class_test = test.getBatch()
 fout.create_dataset("C_test", data=C_test)
 fout.create_dataset("Q_test", data=Q_test)
 fout.create_dataset("A_test", data=A_test)
@@ -652,32 +706,99 @@ fout.create_dataset("T_test", data=T_test)
 del C_test, Q_test, A_test, T_test
 print("Test finished...")
 
-vocab = list(train.getVocab())
+vocab = train.getVocab()
 fout.create_dataset("vocab", data=vocab)
+print("Vocab finished...")
 
+fout.close()
+"""
+
+print("Storing...")
+import h5py
+
+title = "imgRecognitionCluttered.hdf5"
+fout = h5py.File(title, "w")
+
+C_train, Q_train, A_train, T_train, Class_train = train.getBatch()
+fout.create_dataset("C_train", data=C_train)
+fout.create_dataset("Class_train", data=formatClasses(Class_train))
+del C_train, Q_train, A_train, T_train, Class_train
+
+C_valid, Q_valid, A_valid, T_valid, Class_valid = valid.getBatch()
+fout.create_dataset("C_valid", data=C_valid)
+fout.create_dataset("Class_valid", data=formatClasses(Class_valid))
+del C_valid, Q_valid, A_valid, T_valid, Class_valid
+print("Validation finished...")
+
+C_test, Q_test, A_test, T_test, Class_test = test.getBatch()
+fout.create_dataset("C_test", data=C_test)
+fout.create_dataset("Class_test", data=formatClasses(Class_test))
+del C_test, Q_test, A_test, T_test, Class_test
+print("Test finished...")
+
+print("Training finished...")
 fout.close()
 
 
-# In[ ]:
+# In[7]:
 
 """
 %matplotlib inline
 import matplotlib.pyplot as plt 
+from PIL import Image
 
+# Initialize Parameters
+nTrain = 9 # Size of training dataset
+nValid = 50000 # Size of validation dataset
+pValid = float(nValid)/(nTrain+nValid)
+nTest = 50000 # Size of test dataset
+canDim = [64, 64]
+border=[-3,-3]
+nImgs=[1,3, True]
+minImgSep = 0,
+scaling=[.6,1.2]
+clutter = True
+clutterDim=[8,8]
+maxClutter = 6
+
+# Create instance of data
+train = VQAData(X_train, 
+            Y_train, 
+            nTrain, 
+            canDim=canDim, 
+            border=border, 
+            nImgs=nImgs, 
+            scaling=scaling,
+            clutter=clutter,
+            clutterDim = clutterDim,
+            maxClutter = maxClutter)
+
+C_train, Q_train, A_train, T_train = train.getBatch()
 
 for i in range(9):
+    plt.figure(figsize=(10, 10))
     plt.subplot(3, 3, i+1)
-    plt.imshow(canvas[i,0,:,:], cmap='gray')
+    plt.imshow(C_train[i,0,:,:], cmap='gray')
     plt.gca().get_xaxis().set_ticks([])
     plt.gca().get_yaxis().set_ticks([])
-    plt.title("%s" % question[i], fontsize=8)
-    plt.ylabel("answer = %s" % answer[i], fontsize=8)
+    plt.title("%s" % Q_train[i], fontsize=8)
+    plt.ylabel("answer = %s" % A_train[i], fontsize=8)
+    
 #print(question[0])
 #print(answer[0])
 
 plt.axis("off")
+"""
 
 
-vocab = train.getVocab()
+# In[8]:
+
+"""
+I = C_train[7,0,:,:]
+
+I8 = (((I - I.min()) / (I.max() - I.min())) * 255.9).astype(np.uint8)
+
+img = Image.fromarray(I8)
+img.save("clutter1.png")
 """
 
